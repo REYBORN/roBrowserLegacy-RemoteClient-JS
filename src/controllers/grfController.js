@@ -4,6 +4,18 @@ const { GrfNode } = require("@chicowall/grf-loader");
 const fs = require("fs");
 const path = require("path");
 const logger = require("../utils/logger");
+
+const SUPPORTED_FILENAME_ENCODINGS = new Set(["auto", "utf-8", "cp949", "euc-kr"]);
+
+function getFilenameEncoding() {
+	const requested = (process.env.GRF_FILENAME_ENCODING || "auto").trim().toLowerCase();
+	if (!SUPPORTED_FILENAME_ENCODINGS.has(requested)) {
+		logger.warn(`Unsupported GRF_FILENAME_ENCODING "${requested}"; using auto detection.`);
+		return "auto";
+	}
+	return requested;
+}
+
 class Grf {
 	constructor(filePath) {
 		this.fileName = path.basename(filePath);
@@ -20,9 +32,11 @@ class Grf {
 
 		try {
 			const fd = fs.openSync(this.filePath, "r");
-			this.grf = new GrfNode(fd);
+			const filenameEncoding = getFilenameEncoding();
+			this.grf = new GrfNode(fd, { filenameEncoding });
 			await this.grf.load();
 			this.loaded = true;
+			logger.info(`Loaded ${this.fileName} with ${filenameEncoding} filename encoding`);
 		} catch (error) {
 			logger.error("Error loading GRF file:", error);
 		}

@@ -4,6 +4,11 @@ const { execSync } = require("child_process");
 const zlib = require("zlib");
 const { TextDecoder } = require("util");
 
+function getGrfFilenameEncoding() {
+  const requested = (process.env.GRF_FILENAME_ENCODING || "auto").trim().toLowerCase();
+  return ["auto", "utf-8", "cp949", "euc-kr"].includes(requested) ? requested : "auto";
+}
+
 /**
  * Startup validation system
  * Validates resources, configuration and dependencies before starting the server
@@ -124,6 +129,9 @@ class StartupValidator {
 
     const grfResults = [];
     let hasInvalidGrf = false;
+    const filenameEncoding = getGrfFilenameEncoding();
+
+    this.addInfo(`GRF filename encoding: ${filenameEncoding}`);
 
     for (const grfFile of grfFiles) {
       const grfPath = path.join(resourcesPath, grfFile);
@@ -165,7 +173,7 @@ class StartupValidator {
         this.addInfo(`Valid GRF: ${grfFile} (version ${validation.version})`);
 
         // Path encoding diagnosis
-        if (validation.pathEncoding?.encoding === "iso-8859-1") {
+        if (validation.pathEncoding?.encoding === "iso-8859-1" && filenameEncoding === "auto") {
           const samples = validation.pathEncoding.invalidUtf8Samples?.length
             ? ` Examples: ${validation.pathEncoding.invalidUtf8Samples.join(" | ")}`
             : "";
@@ -238,7 +246,7 @@ class StartupValidator {
     }
 
     const signature = this._trimNullTerminatedAscii(header.subarray(0, 16));
-    if (signature !== "Master of Magic") {
+    if (signature !== "Master of Magic" && signature !== "Event Horizon") {
       return { ok: false, reason: `Invalid signature: "${signature}"` };
     }
 
@@ -557,15 +565,32 @@ class StartupValidator {
 
       // REAL TEST: try to load using the library (compatibility with runtime)
       testFd = fs.openSync(grfPath, "r");
-      const grf = new GrfNode(testFd);
+      const grf = new GrfNode(testFd, { filenameEncoding: getGrfFilenameEncoding() });
 
       try {
+        // Large overlay archives can contain hundreds of thousands of entries.
+        // Ten seconds was too aggressive for palettes.grf on otherwise healthy
+        // disks and incorrectly prevented the gateway from starting. Keep the
+        // check bounded, but allow deployments to tune it when their storage is
+        // slower or their GRFs are especially large.
+        const configuredTimeout = Number.parseInt(process.env.GRF_LOAD_TIMEOUT_MS, 10);
+        const loadTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+          ? configuredTimeout
+          : 60000;
         const loadPromise = grf.load();
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("GRF load timeout")), 10000)
-        );
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error(`GRF load timeout after ${loadTimeoutMs}ms`)),
+            loadTimeoutMs
+          );
+        });
 
-        await Promise.race([loadPromise, timeoutPromise]);
+        try {
+          await Promise.race([loadPromise, timeoutPromise]);
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         fs.closeSync(testFd);
         testFd = null;
@@ -692,7 +717,7 @@ class StartupValidator {
 
       try {
         fd = fs.openSync(grfPath, "r");
-        const grf = new GrfNode(fd, { filenameEncoding: "auto" });
+        const grf = new GrfNode(fd, { filenameEncoding: getGrfFilenameEncoding() });
         await grf.load();
 
         const stats = grf.getStats?.() ?? {};
@@ -775,11 +800,14 @@ class StartupValidator {
   }
 
   validateRequiredFiles() {
+    const dataDirectory = process.env.DATA_OVERRIDE_PATH
+      ? path.resolve(process.cwd(), process.env.DATA_OVERRIDE_PATH)
+      : path.join(process.cwd(), "data");
     const checks = [
       { path: "resources", type: "dir", required: true, name: "resources/ folder" },
       { path: "resources/DATA.INI", type: "file", required: true, name: "DATA.INI file" },
       { path: "BGM", type: "dir", required: false, name: "BGM/ folder" },
-      { path: "data", type: "dir", required: false, name: "data/ folder" },
+      { path: "data", fullPath: dataDirectory, type: "dir", required: false, name: "data/ folder" },
       { path: "System", type: "dir", required: false, name: "System/ folder" },
     ];
 
@@ -787,7 +815,7 @@ class StartupValidator {
     const results = [];
 
     for (const check of checks) {
-      const fullPath = path.join(process.cwd(), check.path);
+      const fullPath = check.fullPath || path.join(process.cwd(), check.path);
       const exists = fs.existsSync(fullPath);
 
       if (check.type === "dir") {

@@ -80,6 +80,13 @@ test('a wrong signature is rejected', () => {
   assert.strictEqual(readHeader(b).ok, false);
 });
 
+test('the Event Horizon signature used by 0x300 archives is accepted', () => {
+  const b = buildHeader({ tableOffset: 2000, nFiles: 100, version: 0x300, big: true });
+  b.fill(0, 0, 16);
+  b.write('Event Horizon\0c', 'ascii');
+  assert.strictEqual(readHeader(b).ok, true);
+});
+
 test('byte 15 must be NUL, or the signature comparison fails', () => {
   const b = buildHeader({ tableOffset: 0, nFiles: 7, version: 0x200 });
   b[15] = 0x41;

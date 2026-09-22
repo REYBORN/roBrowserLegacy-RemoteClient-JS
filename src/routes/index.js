@@ -12,6 +12,7 @@ const CACHE_DURATIONS = {
   dynamic: 0,         // No cache for dynamic content
   index: 60,          // 1 minute for index.html
 };
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // Generate ETag from content
 function generateETag(content) {
@@ -34,7 +35,10 @@ function setCacheHeaders(res, filePath, content, cachedETag) {
     // Use pre-computed ETag from cache when available, otherwise compute
     const etag = cachedETag || generateETag(content);
     res.set('ETag', `"${etag}"`);
-    res.set('Cache-Control', `public, max-age=${CACHE_DURATIONS.static}, immutable`);
+    res.set(
+      'Cache-Control',
+      isDevelopment ? 'no-cache, no-store, must-revalidate' : `public, max-age=${CACHE_DURATIONS.static}, immutable`
+    );
     res.set('Last-Modified', new Date().toUTCString());
     return etag;
   }

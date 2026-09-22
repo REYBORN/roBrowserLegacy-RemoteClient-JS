@@ -20,6 +20,8 @@ yarn.lock
 # Generated files
 grf-path-encoding-report.json
 path-mapping.json
+validate-grf-report-*.json
+/_grf-loader-source/
 
 # Logs
 /logs/

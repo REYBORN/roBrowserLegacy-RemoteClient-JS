@@ -12,6 +12,7 @@ const StartupValidator = require('./src/validators/startupValidator');
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 3338;
+const host = process.env.HOST || '127.0.0.1';
 const routes = require('./src/routes');
 const debugMiddleware = require('./src/middlewares/debugMiddleware');
 const createRawImportMiddleware = require('./src/middlewares/rawImportMiddleware');
@@ -57,24 +58,37 @@ async function startServer() {
     process.exit(1);
   }
 
-  // CORS setup - allow all localhost variations
+  // Allow the XAMPP client from localhost and private LAN addresses. This lets
+  // phones on the same network load game assets without opening the gateway to
+  // arbitrary public web origins.
+  const isAllowedClientOrigin = (origin) => {
+    if (!origin) return true;
+    if (origin === CLIENT_PUBLIC_URL) return true;
+    try {
+      const { protocol, hostname } = new URL(origin);
+      if (!['http:', 'https:'].includes(protocol)) return false;
+      return hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        /^10\./.test(hostname) ||
+        /^192\.168\./.test(hostname) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+    } catch {
+      return false;
+    }
+  };
+
   const corsOptions = {
-    origin: [
-      CLIENT_PUBLIC_URL,
-      'http://localhost:8000',
-      'http://127.0.0.1:8000',
-      'http://localhost:8080',
-      'http://127.0.0.1:8080',
-      'http://localhost:3338',
-      'http://127.0.0.1:3338',
-    ],
+    origin(origin, callback) {
+      const allowed = isAllowedClientOrigin(origin);
+      callback(allowed ? null : new Error('Origin is not allowed'), allowed);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
     credentials: true,
   };
 
   app.use(cors(corsOptions));
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '16kb', strict: true }));
+  app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 
   // Compression middleware - compresses text AND binary game assets
   app.use(compression({
@@ -295,8 +309,8 @@ async function startServer() {
     logger.info(`WebSocket proxy enabled on /ws/ (allowed: ${ALLOWED_TARGETS.join(', ')})`);
   }
 
-  server.listen(port, async () => {
-    logger.info(`Server ready on http://localhost:${port}` +
+  server.listen(port, host, async () => {
+    logger.info(`Server ready on http://${host}:${port}` +
       (ENABLE_STATIC_SERVE ? ` | Game: http://localhost:${port}/applications/pwa/index.html` : '') +
       (ENABLE_WSPROXY ? ` | WS Proxy: /ws/` : ''));
 
