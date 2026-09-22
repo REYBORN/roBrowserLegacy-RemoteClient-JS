@@ -3,8 +3,10 @@ const { GrfNode } = require("@chicowall/grf-loader");
 
 const fs = require("fs");
 const path = require("path");
+const iconv = require("iconv-lite");
 const logger = require("../utils/logger");
 
+<<<<<<< HEAD
 const SUPPORTED_FILENAME_ENCODINGS = new Set(["auto", "utf-8", "cp949", "euc-kr"]);
 
 function getFilenameEncoding() {
@@ -15,6 +17,9 @@ function getFilenameEncoding() {
 	}
 	return requested;
 }
+=======
+const NUL = Buffer.from([0]);
+>>>>>>> cf105965e96341efd9195b3fc6864b1434d50cae
 
 class Grf {
 	constructor(filePath) {
@@ -66,6 +71,23 @@ class Grf {
 		}
 
 		return Array.from(this.grf.files.keys());
+	}
+
+	/**
+	 * Every name in the archive as roBrowser keeps them for search (GameFile.js, `table.data`): the raw
+	 * name bytes, one character per byte, each followed by a NUL, in table order.
+	 *
+	 * Built from the bytes on disk rather than by re-encoding the decoded names, so a search sees exactly
+	 * what the client would, whatever encoding the loader detected.
+	 */
+	nameTable() {
+		if (!this.loaded || !this.grf) return "";
+
+		const parts = [];
+		for (const [name, entry] of this.grf.files) {
+			parts.push(entry.rawNameBytes || iconv.encode(name, "cp949"), NUL);
+		}
+		return Buffer.concat(parts).toString("latin1");
 	}
 }
 
